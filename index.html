@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>GPS Treasure Hunt - Semplificata</title>
+<title>GPS Treasure Hunt</title>
 <style>
   html, body {
     margin: 0; padding: 0;
@@ -28,6 +28,10 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    transition: box-shadow 0.3s ease;
+  }
+  .flash {
+    box-shadow: 0 0 20px 5px #00ff00;
   }
   .coords {
     font-size: 1.5em;
@@ -36,33 +40,34 @@
   }
   .buttons {
     margin: 15px 0;
+    display: flex;
+    gap: 10px;
   }
   button {
     background: black;
     border: 2px solid #00ff00;
     color: #00ff00;
     font-family: monospace;
-    font-size: 1.2em;
-    padding: 10px 20px;
-    margin: 0 10px;
+    font-size: 1.1em;
+    padding: 8px 15px;
     cursor: pointer;
   }
   button:hover {
     background: #003300;
   }
   .next-data {
-    font-size: 2em;
+    font-size: 1.6em;
     margin: 20px 0;
     text-align: center;
   }
   .status {
-    font-size: 1.3em;
+    font-size: 1.1em;
     height: 1.5em;
     margin: 10px 0;
     text-align: center;
   }
   .data-list {
-    font-size: 1.2em;
+    font-size: 1.1em;
     margin-top: 20px;
     text-align: left;
     width: 100%;
@@ -70,11 +75,12 @@
 </style>
 </head>
 <body>
-<div class="display">
+<div class="display" id="display">
   <div class="coords" id="coords">Lat: — Lon: — Alt: —</div>
 
-  <div class="buttons" id="buttonsContainer" style="display:none;">
-    <button id="btnAcquire">Prova acquisizione</button>
+  <div class="buttons" id="buttonsContainer">
+    <button id="btnRefresh">Aggiorna posizione</button>
+    <button id="btnAcquire" style="display:none;">Acquisisci dato</button>
   </div>
 
   <div class="next-data" id="nextData">Next Data: —</div>
@@ -97,8 +103,7 @@ let collected = JSON.parse(localStorage.getItem("collectedData") || "[]");
 if (collected.length === 0) collected = targets.map(() => null);
 
 let currentPosition = null;
-let watchId = null;
-let nextIndex = null;  // indice prossimo target da acquisire
+let nextIndex = null;
 
 // === FUNZIONI ===
 function haversine(lat1, lon1, lat2, lon2) {
@@ -112,12 +117,18 @@ function haversine(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+function flashDisplay() {
+  const displayEl = document.getElementById("display");
+  displayEl.classList.add("flash");
+  setTimeout(() => displayEl.classList.remove("flash"), 1000);
+}
+
 function updateCoordsUI() {
   if (!currentPosition) {
     document.getElementById("coords").textContent = `Lat: — Lon: — Alt: —`;
     document.getElementById("nextData").textContent = `Next Data: —`;
     document.getElementById("status").textContent = "";
-    document.getElementById("buttonsContainer").style.display = "none";
+    document.getElementById("btnAcquire").style.display = "none";
     return;
   }
   const { latitude: lat, longitude: lon, altitude: alt } = currentPosition.coords;
@@ -139,16 +150,17 @@ function updateCoordsUI() {
 
   if (nextIndex === null) {
     document.getElementById("nextData").textContent = "All data collected!";
-    document.getElementById("buttonsContainer").style.display = "none";
+    document.getElementById("btnAcquire").style.display = "none";
   } else {
     document.getElementById("nextData").textContent = `Next Data: ${Math.round(nextDist)}m`;
-    // Mostra o nasconde il bottone in base alla distanza
     if (nextDist <= ACQUIRE_RANGE) {
-      document.getElementById("buttonsContainer").style.display = "block";
-      document.getElementById("status").textContent = `Sei entro ${ACQUIRE_RANGE}m da ${targets[nextIndex].name}. Puoi acquisire il dato.`;
+      document.getElementById("btnAcquire").style.display = "inline-block";
+      document.getElementById("status").textContent =
+        `Sei entro ${ACQUIRE_RANGE}m da ${targets[nextIndex].name}. Puoi acquisire il dato.`;
     } else {
-      document.getElementById("buttonsContainer").style.display = "none";
-      document.getElementById("status").textContent = `Sei troppo lontano da ${targets[nextIndex].name} (${Math.round(nextDist)}m). Avvicinati per acquisire.`;
+      document.getElementById("btnAcquire").style.display = "none";
+      document.getElementById("status").textContent =
+        `Sei troppo lontano da ${targets[nextIndex].name} (${Math.round(nextDist)}m).`;
     }
   }
   renderDataList();
@@ -176,11 +188,30 @@ function acquireData() {
   updateCoordsUI();
 }
 
-// === INIZIO WATCH POSITION ===
+function refreshPosition() {
+  if ("geolocation" in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        currentPosition = pos;
+        flashDisplay();
+        updateCoordsUI();
+      },
+      err => {
+        document.getElementById("status").textContent = "Errore GPS: " + err.message;
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+  } else {
+    document.getElementById("status").textContent = "GPS non supportato dal browser.";
+  }
+}
+
+// === WATCH POSITION AUTOMATICO ===
 if ("geolocation" in navigator) {
-  watchId = navigator.geolocation.watchPosition(
+  navigator.geolocation.watchPosition(
     pos => {
       currentPosition = pos;
+      flashDisplay();
       updateCoordsUI();
     },
     err => {
@@ -188,19 +219,15 @@ if ("geolocation" in navigator) {
     },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
   );
-} else {
-  document.getElementById("status").textContent = "GPS non supportato dal browser.";
 }
 
 // === EVENTI BOTTONI ===
-document.getElementById("btnAcquire").addEventListener("click", () => {
-  acquireData();
-});
+document.getElementById("btnRefresh").addEventListener("click", refreshPosition);
+document.getElementById("btnAcquire").addEventListener("click", acquireData);
 
-// === INIZIALIZZA UI ===
+// === AVVIO ===
 renderDataList();
 updateCoordsUI();
-
 </script>
 </body>
 </html>
