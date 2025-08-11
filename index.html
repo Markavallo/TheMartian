@@ -28,10 +28,6 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    transition: box-shadow 0.3s ease;
-  }
-  .flash {
-    box-shadow: 0 0 20px 5px #00ff00;
   }
   .coords {
     font-size: 1.5em;
@@ -48,42 +44,57 @@
     border: 2px solid #00ff00;
     color: #00ff00;
     font-family: monospace;
-    font-size: 1.1em;
-    padding: 8px 15px;
+    font-size: 1.2em;
+    padding: 10px 20px;
     cursor: pointer;
   }
   button:hover {
     background: #003300;
   }
   .next-data {
-    font-size: 1.6em;
+    font-size: 2em;
     margin: 20px 0;
     text-align: center;
   }
   .status {
-    font-size: 1.1em;
+    font-size: 1.3em;
     height: 1.5em;
     margin: 10px 0;
     text-align: center;
   }
   .data-list {
-    font-size: 1.1em;
+    font-size: 1.2em;
     margin-top: 20px;
     text-align: left;
     width: 100%;
   }
+  .distance-bar {
+    height: 20px;
+    width: 100%;
+    background: #003300;
+    border: 1px solid #00ff00;
+    margin: 10px 0;
+    position: relative;
+  }
+  .distance-fill {
+    height: 100%;
+    background: #00ff00;
+    width: 0%;
+    transition: width 0.5s;
+  }
 </style>
 </head>
 <body>
-<div class="display" id="display">
+<div class="display">
   <div class="coords" id="coords">Lat: — Lon: — Alt: —</div>
 
-  <div class="buttons" id="buttonsContainer">
-    <button id="btnRefresh">Aggiorna posizione</button>
-    <button id="btnAcquire" style="display:none;">Acquisisci dato</button>
+  <div class="buttons" id="buttonsContainer" style="display:none;">
+    <button id="btnAcquire">Prova acquisizione</button>
+    <button id="btnUpdate">Aggiorna posizione</button>
   </div>
 
   <div class="next-data" id="nextData">Next Data: —</div>
+  <div class="distance-bar"><div class="distance-fill" id="distanceFill"></div></div>
   <div class="status" id="status"></div>
   <div class="data-list" id="dataList"></div>
 </div>
@@ -103,6 +114,7 @@ let collected = JSON.parse(localStorage.getItem("collectedData") || "[]");
 if (collected.length === 0) collected = targets.map(() => null);
 
 let currentPosition = null;
+let watchId = null;
 let nextIndex = null;
 
 // === FUNZIONI ===
@@ -117,25 +129,20 @@ function haversine(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-function flashDisplay() {
-  const displayEl = document.getElementById("display");
-  displayEl.classList.add("flash");
-  setTimeout(() => displayEl.classList.remove("flash"), 1000);
-}
-
 function updateCoordsUI() {
   if (!currentPosition) {
     document.getElementById("coords").textContent = `Lat: — Lon: — Alt: —`;
     document.getElementById("nextData").textContent = `Next Data: —`;
-    document.getElementById("status").textContent = "";
-    document.getElementById("btnAcquire").style.display = "none";
+    document.getElementById("status").textContent = "Ricerca segnale GPS…";
+    document.getElementById("buttonsContainer").style.display = "none";
+    document.getElementById("distanceFill").style.width = "0%";
     return;
   }
+
   const { latitude: lat, longitude: lon, altitude: alt } = currentPosition.coords;
   document.getElementById("coords").textContent =
     `Lat: ${lat.toFixed(6)} Lon: ${lon.toFixed(6)} Alt: ${alt !== null ? alt.toFixed(1) : "—"}m`;
 
-  // Trova prossimo target non raccolto più vicino
   nextIndex = null;
   let nextDist = Infinity;
   for (let i = 0; i < targets.length; i++) {
@@ -150,17 +157,19 @@ function updateCoordsUI() {
 
   if (nextIndex === null) {
     document.getElementById("nextData").textContent = "All data collected!";
-    document.getElementById("btnAcquire").style.display = "none";
+    document.getElementById("buttonsContainer").style.display = "none";
+    document.getElementById("distanceFill").style.width = "100%";
   } else {
     document.getElementById("nextData").textContent = `Next Data: ${Math.round(nextDist)}m`;
+    const fillPercent = Math.min(100, (1 - nextDist / 200) * 100); // barra piena a 0m, vuota a 200m+
+    document.getElementById("distanceFill").style.width = `${Math.max(0, fillPercent)}%`;
+
     if (nextDist <= ACQUIRE_RANGE) {
-      document.getElementById("btnAcquire").style.display = "inline-block";
-      document.getElementById("status").textContent =
-        `Sei entro ${ACQUIRE_RANGE}m da ${targets[nextIndex].name}. Puoi acquisire il dato.`;
+      document.getElementById("buttonsContainer").style.display = "flex";
+      document.getElementById("status").textContent = `Sei entro ${ACQUIRE_RANGE}m da ${targets[nextIndex].name}. Puoi acquisire il dato.`;
     } else {
-      document.getElementById("btnAcquire").style.display = "none";
-      document.getElementById("status").textContent =
-        `Sei troppo lontano da ${targets[nextIndex].name} (${Math.round(nextDist)}m).`;
+      document.getElementById("buttonsContainer").style.display = "none";
+      document.getElementById("status").textContent = `Troppo lontano da ${targets[nextIndex].name} (${Math.round(nextDist)}m).`;
     }
   }
   renderDataList();
@@ -188,44 +197,44 @@ function acquireData() {
   updateCoordsUI();
 }
 
-function refreshPosition() {
-  if ("geolocation" in navigator) {
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        currentPosition = pos;
-        flashDisplay();
-        updateCoordsUI();
-      },
-      err => {
-        document.getElementById("status").textContent = "Errore GPS: " + err.message;
-      },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-    );
-  } else {
-    document.getElementById("status").textContent = "GPS non supportato dal browser.";
-  }
-}
-
-// === WATCH POSITION AUTOMATICO ===
+// === WATCH GPS ===
 if ("geolocation" in navigator) {
-  navigator.geolocation.watchPosition(
+  watchId = navigator.geolocation.watchPosition(
     pos => {
       currentPosition = pos;
-      flashDisplay();
       updateCoordsUI();
     },
     err => {
       document.getElementById("status").textContent = "Errore GPS: " + err.message;
     },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
   );
+} else {
+  document.getElementById("status").textContent = "GPS non supportato dal browser.";
 }
 
 // === EVENTI BOTTONI ===
-document.getElementById("btnRefresh").addEventListener("click", refreshPosition);
 document.getElementById("btnAcquire").addEventListener("click", acquireData);
 
-// === AVVIO ===
+document.getElementById("btnUpdate").addEventListener("click", () => {
+  document.getElementById("status").textContent = "Ricerca nuova posizione...";
+  if ("geolocation" in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        currentPosition = pos;
+        updateCoordsUI();
+      },
+      err => {
+        document.getElementById("status").textContent = "Errore GPS: " + err.message;
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
+    );
+  } else {
+    document.getElementById("status").textContent = "GPS non supportato dal browser.";
+  }
+});
+
+// === INIT ===
 renderDataList();
 updateCoordsUI();
 </script>
