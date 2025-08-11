@@ -197,11 +197,12 @@ document.getElementById("btnUpdate").addEventListener("click", () => {
       document.getElementById("status").textContent = "Posizione aggiornata.";
     }, err => {
       document.getElementById("status").textContent = "Errore GPS: " + err.message;
-    }, { enableHighAccuracy: true });
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
   } else {
     document.getElementById("status").textContent = "GPS non supportato dal browser.";
   }
 });
+
 
 document.getElementById("btnAcquire").addEventListener("click", () => {
   acquireData();
@@ -214,3 +215,4 @@ updateCoordsUI();
 </script>
 </body>
 </html>
+
