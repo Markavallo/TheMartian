@@ -44,12 +44,18 @@
     border: 2px solid #00ff00;
     color: #00ff00;
     font-family: monospace;
-    font-size: 1.2em;
-    padding: 10px 20px;
+    font-size: 1em;
+    padding: 10px 15px;
     cursor: pointer;
   }
   button:hover {
     background: #003300;
+  }
+  .blink {
+    animation: blinkAnim 1s infinite;
+  }
+  @keyframes blinkAnim {
+    50% { opacity: 0; }
   }
   .next-data {
     font-size: 2em;
@@ -68,33 +74,18 @@
     text-align: left;
     width: 100%;
   }
-  .distance-bar {
-    height: 20px;
-    width: 100%;
-    background: #003300;
-    border: 1px solid #00ff00;
-    margin: 10px 0;
-    position: relative;
-  }
-  .distance-fill {
-    height: 100%;
-    background: #00ff00;
-    width: 0%;
-    transition: width 0.5s;
-  }
 </style>
 </head>
 <body>
 <div class="display">
   <div class="coords" id="coords">Lat: — Lon: — Alt: —</div>
 
-  <div class="buttons" id="buttonsContainer" style="display:none;">
-    <button id="btnAcquire">Prova acquisizione</button>
+  <div class="buttons">
     <button id="btnUpdate">Aggiorna posizione</button>
+    <button id="btnAcquire" style="display:none;">Prova acquisizione</button>
   </div>
 
   <div class="next-data" id="nextData">Next Data: —</div>
-  <div class="distance-bar"><div class="distance-fill" id="distanceFill"></div></div>
   <div class="status" id="status"></div>
   <div class="data-list" id="dataList"></div>
 </div>
@@ -114,8 +105,7 @@ let collected = JSON.parse(localStorage.getItem("collectedData") || "[]");
 if (collected.length === 0) collected = targets.map(() => null);
 
 let currentPosition = null;
-let watchId = null;
-let nextIndex = null;
+let nextIndex = null;  // indice prossimo target da acquisire
 
 // === FUNZIONI ===
 function haversine(lat1, lon1, lat2, lon2) {
@@ -133,16 +123,15 @@ function updateCoordsUI() {
   if (!currentPosition) {
     document.getElementById("coords").textContent = `Lat: — Lon: — Alt: —`;
     document.getElementById("nextData").textContent = `Next Data: —`;
-    document.getElementById("status").textContent = "Ricerca segnale GPS…";
-    document.getElementById("buttonsContainer").style.display = "none";
-    document.getElementById("distanceFill").style.width = "0%";
+    document.getElementById("status").textContent = "";
+    document.getElementById("btnAcquire").style.display = "none";
     return;
   }
-
   const { latitude: lat, longitude: lon, altitude: alt } = currentPosition.coords;
   document.getElementById("coords").textContent =
     `Lat: ${lat.toFixed(6)} Lon: ${lon.toFixed(6)} Alt: ${alt !== null ? alt.toFixed(1) : "—"}m`;
 
+  // Trova prossimo target non raccolto più vicino
   nextIndex = null;
   let nextDist = Infinity;
   for (let i = 0; i < targets.length; i++) {
@@ -157,18 +146,14 @@ function updateCoordsUI() {
 
   if (nextIndex === null) {
     document.getElementById("nextData").textContent = "All data collected!";
-    document.getElementById("buttonsContainer").style.display = "none";
-    document.getElementById("distanceFill").style.width = "100%";
+    document.getElementById("btnAcquire").style.display = "none";
   } else {
     document.getElementById("nextData").textContent = `Next Data: ${Math.round(nextDist)}m`;
-    const fillPercent = Math.min(100, (1 - nextDist / 200) * 100); // barra piena a 0m, vuota a 200m+
-    document.getElementById("distanceFill").style.width = `${Math.max(0, fillPercent)}%`;
-
     if (nextDist <= ACQUIRE_RANGE) {
-      document.getElementById("buttonsContainer").style.display = "flex";
-      document.getElementById("status").textContent = `Sei entro ${ACQUIRE_RANGE}m da ${targets[nextIndex].name}. Puoi acquisire il dato.`;
+      document.getElementById("btnAcquire").style.display = "inline-block";
+      document.getElementById("status").textContent = `Sei entro ${ACQUIRE_RANGE}m da ${targets[nextIndex].name}.`;
     } else {
-      document.getElementById("buttonsContainer").style.display = "none";
+      document.getElementById("btnAcquire").style.display = "none";
       document.getElementById("status").textContent = `Troppo lontano da ${targets[nextIndex].name} (${Math.round(nextDist)}m).`;
     }
   }
@@ -197,44 +182,29 @@ function acquireData() {
   updateCoordsUI();
 }
 
-// === WATCH GPS ===
-if ("geolocation" in navigator) {
-  watchId = navigator.geolocation.watchPosition(
+function getPosition() {
+  const btnUpdate = document.getElementById("btnUpdate");
+  btnUpdate.classList.add("blink");
+  document.getElementById("status").textContent = "Ricerca segnale GPS...";
+  navigator.geolocation.getCurrentPosition(
     pos => {
       currentPosition = pos;
+      btnUpdate.classList.remove("blink");
       updateCoordsUI();
     },
     err => {
+      btnUpdate.classList.remove("blink");
       document.getElementById("status").textContent = "Errore GPS: " + err.message;
     },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
   );
-} else {
-  document.getElementById("status").textContent = "GPS non supportato dal browser.";
 }
 
-// === EVENTI BOTTONI ===
+// === EVENTI ===
+document.getElementById("btnUpdate").addEventListener("click", getPosition);
 document.getElementById("btnAcquire").addEventListener("click", acquireData);
 
-document.getElementById("btnUpdate").addEventListener("click", () => {
-  document.getElementById("status").textContent = "Ricerca nuova posizione...";
-  if ("geolocation" in navigator) {
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        currentPosition = pos;
-        updateCoordsUI();
-      },
-      err => {
-        document.getElementById("status").textContent = "Errore GPS: " + err.message;
-      },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 }
-    );
-  } else {
-    document.getElementById("status").textContent = "GPS non supportato dal browser.";
-  }
-});
-
-// === INIT ===
+// === AVVIO ===
 renderDataList();
 updateCoordsUI();
 </script>
