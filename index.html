@@ -185,7 +185,8 @@ function acquireData() {
 function getPosition() {
   const btnUpdate = document.getElementById("btnUpdate");
   btnUpdate.classList.add("blink");
-  document.getElementById("status").textContent = "Ricerca segnale GPS...";
+  document.getElementById("status").textContent = "Ricerca posizione...";
+
   navigator.geolocation.getCurrentPosition(
     pos => {
       currentPosition = pos;
