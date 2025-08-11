@@ -191,19 +191,21 @@ function acquireData() {
 // === EVENTI BOTTONI ===
 document.getElementById("btnUpdate").addEventListener("click", () => {
   if ("geolocation" in navigator) {
-    navigator.geolocation.getCurrentPosition(pos => {
-      currentPosition = pos;
-      updateCoordsUI();
-      document.getElementById("status").textContent = "Posizione aggiornata.";
-    }, err => {
-      document.getElementById("status").textContent = "Errore GPS: " + err.message;
-    }, { enableHighAccuracy: true });
-    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        currentPosition = pos;
+        updateCoordsUI();
+        document.getElementById("status").textContent = "Posizione aggiornata.";
+      },
+      err => {
+        document.getElementById("status").textContent = "Errore GPS: " + err.message;
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
   } else {
     document.getElementById("status").textContent = "GPS non supportato dal browser.";
   }
 });
-
 
 document.getElementById("btnAcquire").addEventListener("click", () => {
   acquireData();
