@@ -3,216 +3,103 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>GPS Treasure Hunt - Semplificata</title>
+<title>GPS Gadget — Live</title>
 <style>
-  html, body {
-    margin: 0; padding: 0;
-    background: black;
-    color: #00ff00;
-    font-family: monospace;
-    text-shadow: 0 0 5px #00ff00;
-    height: 100%;
-    width: 100%;
-  }
-  body {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-  .display {
-    border: 3px solid #00ff00;
-    box-sizing: border-box;
-    width: 100%;
-    max-width: 500px;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  .coords {
-    font-size: 1.5em;
-    margin: 10px 0;
-    text-align: center;
-  }
-  .buttons {
-    margin: 15px 0;
-  }
-  button {
-    background: black;
-    border: 2px solid #00ff00;
-    color: #00ff00;
-    font-family: monospace;
-    font-size: 1.2em;
-    padding: 10px 20px;
-    margin: 0 10px;
-    cursor: pointer;
-  }
-  button:hover {
-    background: #003300;
-  }
-  .next-data {
-    font-size: 2em;
-    margin: 20px 0;
-    text-align: center;
-  }
-  .status {
-    font-size: 1.3em;
-    height: 1.5em;
-    margin: 10px 0;
-    text-align: center;
-  }
-  .data-list {
-    font-size: 1.2em;
-    margin-top: 20px;
-    text-align: left;
-    width: 100%;
-  }
+  :root { --bg:#000; --fg:#00ffb3; --accent:#00c0ff; }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:ui-monospace,monospace;}
+  .wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;padding:20px;}
+  .screen{width:min(820px,94vw);background:#040404;border:2px solid #0a4;box-shadow:0 0 20px rgba(0,255,180,0.06);padding:24px;border-radius:12px;text-align:center;}
+  .digits{font-size:2.4rem;letter-spacing:0.06em;}
+  .small{font-size:1rem;color:#9ff;}
+  .meta{margin-top:8px;color:#7ff;}
+  .controls{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+  button{background:transparent;border:1px solid #0aa;padding:8px 12px;border-radius:8px;color:var(--fg);font-weight:600;}
+  input[type="text"]{padding:8px;border-radius:8px;border:1px solid #0aa;background:#001;}
+  .status{margin-top:8px;color:#8f8;font-weight:700;}
 </style>
 </head>
 <body>
-<div class="display">
-  <div class="coords" id="coords">Lat: — Lon: — Alt: —</div>
-  
-  <div class="buttons">
-    <button id="btnUpdate">Aggiorna posizione</button>
-    <button id="btnAcquire">Prova acquisizione</button>
+  <div class="wrap">
+    <div class="screen" role="application" aria-label="GPS Gadget">
+      <div class="digits" id="lat">Lat: —</div>
+      <div class="digits" id="lon">Lon: —</div>
+      <div class="digits" id="alt">Alt: —</div>
+      <div class="small" id="acc">Accuratezza: —</div>
+      <div class="meta" id="time">—</div>
+
+      <div class="controls">
+        <button id="startBtn">Avvia</button>
+        <button id="stopBtn" disabled>Ferma</button>
+        <button id="copyBtn">Copia valori</button>
+      </div>
+
+      <div class="status" id="status">Premi "Avvia" per chiedere il permesso GPS.</div>
+    </div>
   </div>
-  
-  <div class="next-data" id="nextData">Next Data: —</div>
-  <div class="status" id="status"></div>
-  <div class="data-list" id="dataList"></div>
-</div>
 
 <script>
-// === CONFIG ===
-const targets = [
-  { name: "Data 1", lat: 44.324795, lon: 7.554488 },
-  { name: "Data 2", lat: 44.324613, lon: 7.5530458 },
-  { name: "Data 3", lat: 44.32436, lon: 7.5533983 },
-  { name: "Data 4", lat: 44.3250311, lon: 7.5539705 }
-];
-const ACQUIRE_RANGE = 20; // metri
+(() => {
+  const latEl = document.getElementById('lat');
+  const lonEl = document.getElementById('lon');
+  const altEl = document.getElementById('alt');
+  const accEl = document.getElementById('acc');
+  const timeEl = document.getElementById('time');
+  const statusEl = document.getElementById('status');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const copyBtn = document.getElementById('copyBtn');
 
-// === STATO ===
-let collected = JSON.parse(localStorage.getItem("collectedData") || "[]");
-if (collected.length === 0) collected = targets.map(() => null);
+  let watchId = null;
+  const opts = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 };
 
-let currentPosition = null;
+  function formatNum(n, digits=6){ return (typeof n === 'number') ? n.toFixed(digits) : '—'; }
 
-// === FUNZIONI ===
-function haversine(lat1, lon1, lat2, lon2) {
-  const R = 6371e3;
-  const toRad = x => x * Math.PI / 180;
-  const φ1 = toRad(lat1), φ2 = toRad(lat2);
-  const Δφ = toRad(lat2 - lat1);
-  const Δλ = toRad(lon2 - lon1);
-  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function updateCoordsUI() {
-  if (!currentPosition) {
-    document.getElementById("coords").textContent = `Lat: — Lon: — Alt: —`;
-    document.getElementById("nextData").textContent = `Next Data: —`;
-    document.getElementById("status").textContent = "";
-    return;
-  }
-  const { latitude: lat, longitude: lon, altitude: alt } = currentPosition.coords;
-  document.getElementById("coords").textContent =
-    `Lat: ${lat.toFixed(6)} Lon: ${lon.toFixed(6)} Alt: ${alt !== null ? alt.toFixed(1) : "—"}m`;
-
-  let nextIndex = null;
-  let nextDist = Infinity;
-  for (let i = 0; i < targets.length; i++) {
-    if (!collected[i]) {
-      const dist = haversine(lat, lon, targets[i].lat, targets[i].lon);
-      if (dist < nextDist) {
-        nextDist = dist;
-        nextIndex = i;
-      }
+  function onPos(pos){
+    const c = pos.coords;
+    latEl.textContent = 'Lat: ' + formatNum(c.latitude, 6);
+    lonEl.textContent = 'Lon: ' + formatNum(c.longitude, 6);
+    altEl.textContent = 'Alt: ' + (c.altitude === null ? 'N/D' : formatNum(c.altitude, 2) + ' m');
+    accEl.textContent = 'Accuratezza: ' + (c.accuracy ? c.accuracy.toFixed(1) + ' m' : '—');
+    timeEl.textContent = 'Ultimo aggiornamento: ' + new Date(pos.timestamp).toLocaleTimeString();
+    statusEl.textContent = 'Posizione aggiornata';
+    // se vuoi trasmettere questa posizione a un server, metti qui la chiamata fetch/WebSocket/Firebase
+    if (window.broadcastPosition && typeof window.broadcastPosition === 'function') {
+      try { window.broadcastPosition({lat:c.latitude, lon:c.longitude, alt:c.altitude, acc:c.accuracy, ts: pos.timestamp}); } catch(e){ /* ignore */ }
     }
   }
 
-  if (nextIndex === null) {
-    document.getElementById("nextData").textContent = "All data collected!";
-  } else {
-    document.getElementById("nextData").textContent = `Next Data: ${Math.round(nextDist)}m`;
+  function onError(err){
+    statusEl.textContent = 'Errore GPS: ' + (err && err.message ? err.message : 'sconosciuto');
   }
-  renderDataList();
-}
 
-function renderDataList() {
-  const listEl = document.getElementById("dataList");
-  listEl.innerHTML = "";
-  targets.forEach((t, i) => {
-    const status = collected[i] ? collected[i] : "?";
-    const div = document.createElement("div");
-    div.textContent = `${t.name}: ${status}`;
-    listEl.appendChild(div);
+  startBtn.addEventListener('click', () => {
+    if (!('geolocation' in navigator)) {
+      alert('Il tuo browser non supporta la Geolocation API.');
+      return;
+    }
+    statusEl.textContent = 'Richiedo permesso...';
+    watchId = navigator.geolocation.watchPosition(onPos, onError, opts);
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
   });
-}
 
-function acquireData() {
-  if (!currentPosition) {
-    document.getElementById("status").textContent = "Posizione non aggiornata!";
-    return;
-  }
-  const lat = currentPosition.coords.latitude;
-  const lon = currentPosition.coords.longitude;
-
-  let nextIndex = null;
-  let nextDist = Infinity;
-  for (let i = 0; i < targets.length; i++) {
-    if (!collected[i]) {
-      const dist = haversine(lat, lon, targets[i].lat, targets[i].lon);
-      if (dist < nextDist) {
-        nextDist = dist;
-        nextIndex = i;
-      }
+  stopBtn.addEventListener('click', () => {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
     }
-  }
+    statusEl.textContent = 'Tracciamento fermo.';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  });
 
-  if (nextIndex === null) {
-    document.getElementById("status").textContent = "Tutti i dati sono stati raccolti!";
-    return;
-  }
+  copyBtn.addEventListener('click', async () => {
+    const text = `${latEl.textContent} | ${lonEl.textContent} | ${altEl.textContent}`;
+    try { await navigator.clipboard.writeText(text); statusEl.textContent = 'Valori copiati negli appunti.'; }
+    catch(e){ statusEl.textContent = 'Copia non riuscita.'; }
+  });
 
-  if (nextDist <= ACQUIRE_RANGE) {
-    collected[nextIndex] = targets[nextIndex].name;
-    localStorage.setItem("collectedData", JSON.stringify(collected));
-    document.getElementById("status").textContent = `${targets[nextIndex].name} acquisito!`;
-    updateCoordsUI();
-  } else {
-    document.getElementById("status").textContent = `Sei troppo lontano da ${targets[nextIndex].name} (${Math.round(nextDist)}m)`;
-  }
-}
-
-// === EVENTI BOTTONI ===
-document.getElementById("btnUpdate").addEventListener("click", () => {
-  if ("geolocation" in navigator) {
-    navigator.geolocation.getCurrentPosition(pos => {
-      currentPosition = pos;
-      updateCoordsUI();
-      document.getElementById("status").textContent = "Posizione aggiornata.";
-    }, err => {
-      document.getElementById("status").textContent = "Errore GPS: " + err.message;
-    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
-  } else {
-    document.getElementById("status").textContent = "GPS non supportato dal browser.";
-  }
-});
-
-
-document.getElementById("btnAcquire").addEventListener("click", () => {
-  acquireData();
-});
-
-// === INIZIALIZZA ===
-renderDataList();
-updateCoordsUI();
-
+})();
 </script>
 </body>
 </html>
-
